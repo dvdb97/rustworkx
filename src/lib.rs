@@ -41,6 +41,7 @@ mod transitivity;
 mod traversal;
 mod tree;
 mod union;
+mod flow;
 
 use bisimulation::*;
 use cartesian_product::*;
@@ -67,6 +68,7 @@ use transitivity::*;
 use traversal::*;
 use tree::*;
 use union::*;
+use flow::*;
 
 use hashbrown::HashMap;
 use numpy::Complex64;
@@ -626,6 +628,7 @@ fn rustworkx(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     m.add_wrapped(wrap_pyfunction!(parse_node_link_json))?;
     m.add_wrapped(wrap_pyfunction!(pagerank))?;
     m.add_wrapped(wrap_pyfunction!(hits))?;
+    m.add_wrapped(wrap_pyfunction!(ford_fulkerson))?;
     m.add_class::<digraph::PyDiGraph>()?;
     m.add_class::<graph::PyGraph>()?;
     m.add_class::<toposort::TopologicalSorter>()?;

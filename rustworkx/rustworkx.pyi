@@ -1052,6 +1052,15 @@ def graph_union(
     merge_edges: bool = ...,
 ) -> PyGraph[_S, _T]: ...
 
+# Flows
+
+def ford_fulkerson(
+    graph: PyDiGraph[_S, _T],
+    source: int,
+    sink: int,
+    cap_fn: Callable[[_T], int]
+) -> dict[tuple[int, int], int]: ...
+
 # Dominance
 
 def immediate_dominators(graph: PyDiGraph[_S, _T], start_node: int, /) -> dict[int, int]: ...
