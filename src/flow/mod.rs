@@ -2,9 +2,9 @@ use std::u128;
 
 use crate::digraph;
 use crate::edge_weights_from_callable;
+use crate::weight_callable;
 use petgraph::graph::NodeIndex;
 use petgraph::stable_graph::EdgeIndex;
-use petgraph::visit::EdgeRef;
 use rustworkx_core::flow;
 
 use hashbrown::HashMap;
@@ -13,7 +13,6 @@ use pyo3::prelude::*;
 use pyo3::Python;
 use pyo3::exceptions::PyIndexError;
 
-use crate::weight_callable;
 
 
 #[pyfunction]
@@ -27,7 +26,7 @@ pub fn ford_fulkerson(
     source: usize,
     sink: usize,
     cap_fn: Option<PyObject>
-) -> PyResult<HashMap<(usize, usize), u128>> {
+) -> PyResult<HashMap<(usize, usize), u64>> {
     if !graph.graph.contains_node(NodeIndex::new(source)) {
         return Err(PyIndexError::new_err(format!(
             "Node source index \"{source}\" out of graph bound"
@@ -43,13 +42,15 @@ pub fn ford_fulkerson(
     let source = NodeIndex::new(source);
     let sink = NodeIndex::new(sink);
 
-    let edge_caps: Vec<Option<u128>> = edge_weights_from_callable(py, &graph.graph, &cap_fn, u128::MAX)?;
-    let int_cap_fn = |e: EdgeIndex| -> PyResult<u128> {
+    let edge_caps: Vec<Option<u64>> = edge_weights_from_callable(py, &graph.graph, &cap_fn, u64::MAX)?;
+    let int_cap_fn = |e: EdgeIndex| -> Result<u64, PyErr> {
         match edge_caps[e.index()] {
             Some(weight) => Ok(weight),
             None => Err(PyIndexError::new_err("No edge found for index")),
         }
     };
+
+    let edges = graph.edges();
     
-    flow::ford_fulkerson(&graph.graph, source, sink, |e| int_cap_fn(e.id()))
+    flow::ford_fulkerson(&graph.graph, source, sink, |e| weight_callable(py, &cap_fn, e.weight(), 0u64))
 }
