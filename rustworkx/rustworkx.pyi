@@ -1061,6 +1061,12 @@ def ford_fulkerson(
     cap_fn: Callable[[_T], int]
 ) -> dict[tuple[int, int], int]: ...
 
+def cycle_canceling(
+    graph: PyDiGraph[_S, _T],
+    cap_fn: Callable[[_T], int],
+    cost_fn: Callable[[_T], int]
+) -> dict[tuple[int, int], int]: ...
+
 # Dominance
 
 def immediate_dominators(graph: PyDiGraph[_S, _T], start_node: int, /) -> dict[int, int]: ...

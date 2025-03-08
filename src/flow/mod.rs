@@ -1,10 +1,6 @@
-use std::u128;
-
 use crate::digraph;
-use crate::edge_weights_from_callable;
 use crate::weight_callable;
 use petgraph::graph::NodeIndex;
-use petgraph::stable_graph::EdgeIndex;
 use rustworkx_core::flow;
 
 use hashbrown::HashMap;
@@ -40,17 +36,22 @@ pub fn ford_fulkerson(
     }
 
     let source = NodeIndex::new(source);
-    let sink = NodeIndex::new(sink);
-
-    let edge_caps: Vec<Option<u64>> = edge_weights_from_callable(py, &graph.graph, &cap_fn, u64::MAX)?;
-    let int_cap_fn = |e: EdgeIndex| -> Result<u64, PyErr> {
-        match edge_caps[e.index()] {
-            Some(weight) => Ok(weight),
-            None => Err(PyIndexError::new_err("No edge found for index")),
-        }
-    };
-
-    let edges = graph.edges();
-    
+    let sink = NodeIndex::new(sink);   
     flow::ford_fulkerson(&graph.graph, source, sink, |e| weight_callable(py, &cap_fn, e.weight(), 0u64))
+}
+
+
+#[pyfunction]
+#[pyo3(
+    signature=(graph, cap_fn, cost_fn),
+    text_signature = "(graph, cap_fn, cost_fn)"
+)]
+pub fn cycle_canceling(
+    py: Python,
+    graph: &digraph::PyDiGraph,
+    cap_fn: Option<PyObject>,
+    cost_fn: Option<PyObject>
+) -> PyResult<HashMap<(usize, usize), u64>> {
+    let flow = HashMap::new();   
+    flow::cycle_canceling(&graph.graph, flow, |e| weight_callable(py, &cap_fn, e.weight(), u64::MAX), |e| weight_callable(py, &cost_fn, e.weight(), 0i64))
 }
