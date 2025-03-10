@@ -5,7 +5,13 @@ use petgraph::{adj::NodeIndex, csr::IndexType, data::Build, prelude::{DiGraphMap
 
 use crate::shortest_path::negative_cycle_finder;
 
-use super::residual::ResArcType;
+
+#[derive(Clone, Copy)]
+pub enum ResArcType<E> {
+    Forward(E),
+    Backward(E),
+}
+
 
 
 fn residual_edge_costs<E>(

@@ -9,8 +9,14 @@ use petgraph::visit::{
 use petgraph::Direction;
 
 use crate::Result;
-use crate::traversal::{breadth_first_search, BfsEvent};
-use crate::flow::residual::ResArcType;
+
+
+#[derive(Clone, Copy)]
+pub enum ResDfsArc<E> {
+    Forward(E),
+    Backward(E),
+    Root
+}
 
 
 fn find_augmenting_path<G>(
@@ -18,47 +24,41 @@ fn find_augmenting_path<G>(
     source: G::NodeId,
     sink: G::NodeId,
     caps: &HashMap<(usize, usize), u64>,
-    flow: &HashMap<(usize, usize), u64>,
-    preds: &mut Vec<Option<ResArcType<(usize, usize)>>>
-) -> bool
+    flow: &HashMap<(usize, usize), u64>
+) -> Option<Vec<Option<ResDfsArc<(usize, usize)>>>>
 where 
-    G: IntoEdgesDirected + Visitable + NodeIndexable,
+    G: IntoEdgesDirected + Visitable + NodeIndexable + NodeCount,
     G::NodeId: Eq + IndexType + Hash
 {
     let mut queue = VecDeque::from([source]);
-    let mut visited = graph.visit_map();
+    let mut preds: Vec<Option<ResDfsArc<(usize, usize)>>> = vec![None; graph.node_count()];
+    preds[source.index()] = Some(ResDfsArc::Root);
 
     while let Some(vertex) = queue.pop_front() {
         if vertex == sink {
-            return true;
+            return Some(preds);
         }
-
-        visited.visit(vertex);
 
         for edge_ref in graph.edges_directed(vertex, Direction::Outgoing) {
             let edge = (edge_ref.source().index(), edge_ref.target().index());
-            let succ = edge_ref.target();
 
-            if !visited.is_visited(&succ) &&  caps[&edge] - flow[&edge] > 0 {
-                queue.push_back(succ);
-                preds[edge.1] = Some(ResArcType::Forward(edge));
+            if preds[edge.1].is_none() && caps[&edge] - flow[&edge] > 0 {
+                queue.push_back(edge_ref.target());
+                preds[edge.1] = Some(ResDfsArc::Forward(edge));
             }
         }
 
         for edge_ref in graph.edges_directed(vertex, Direction::Incoming) {
             let edge = (edge_ref.source().index(), edge_ref.target().index());
-            let succ = edge_ref.source();
 
-            if !visited.is_visited(&succ) && flow[&edge] > 0  {
-                if !visited.is_visited(&succ) {
-                    queue.push_back(succ);
-                    preds[edge.0] = Some(ResArcType::Backward(edge));
-                }
+            if preds[edge.0].is_none() && flow[&edge] > 0  {
+                queue.push_back(edge_ref.source());
+                preds[edge.0] = Some(ResDfsArc::Backward(edge));
             }
         }
     }
 
-    false
+    None
 }
 
 
@@ -82,36 +82,43 @@ where
         *caps.entry(edge).or_default() = cap_fn(edge_ref)?;
     }
 
-    // Predecessor mapping for shortest augmenting paths.
-    let mut pred: Vec<Option<ResArcType<(usize, usize)>>> = vec![None; graph.node_count()];
-
-    while find_augmenting_path(graph, source, sink, &caps, &flow, &mut pred) {
+    while let Some(preds) = find_augmenting_path(graph, source, sink, &caps, &flow) {
         let mut vertex = NodeIndexable::to_index(&graph, sink);
         let mut bottleneck = u64::MAX;
-
+        
         // Compute the residual path's bottleneck capacity.
-        while let Some(res_edge) = pred[vertex] {
+        while let Some(res_edge) = preds[vertex] {
+            if let ResDfsArc::Root = res_edge {
+                break;
+            }
+
             bottleneck = match res_edge {
-                ResArcType::Forward(edge) => bottleneck.min(caps[&edge] - flow[&edge]),
-                ResArcType::Backward(edge) => bottleneck.min(flow[&edge])
+                ResDfsArc::Forward(edge)  => bottleneck.min(caps[&edge] - flow[&edge]),
+                ResDfsArc::Backward(edge) => bottleneck.min(flow[&edge]),
+                ResDfsArc::Root                           => unreachable!()
             };
 
             vertex = match res_edge {
-                ResArcType::Forward(edge) => edge.0,
-                ResArcType::Backward(edge) => edge.1
+                ResDfsArc::Forward(edge)  => edge.0,
+                ResDfsArc::Backward(edge) => edge.1,
+                ResDfsArc::Root                           => unreachable!()
             };
         }
 
         let mut vertex = NodeIndexable::to_index(&graph, sink);
 
         // Augment along the residual path.
-        while let Some(res_edge) = pred[vertex] {
-            if let ResArcType::Forward(edge) = res_edge {
+        while let Some(res_edge) = preds[vertex] {
+            if let ResDfsArc::Root = res_edge {
+                break;
+            }
+
+            if let ResDfsArc::Forward(edge) = res_edge {
                 *flow.entry(edge).or_insert(0) += bottleneck;
                 vertex = edge.0;
             }
 
-            if let ResArcType::Backward(edge) = res_edge {
+            if let ResDfsArc::Backward(edge) = res_edge {
                 *flow.entry(edge).or_insert(0) -= bottleneck;
                 vertex = edge.1;
             }
