@@ -1063,6 +1063,7 @@ def ford_fulkerson(
 
 def cycle_canceling(
     graph: PyDiGraph[_S, _T],
+    flow: dict[tuple[int, int], int],
     cap_fn: Callable[[_T], int],
     cost_fn: Callable[[_T], int]
 ) -> dict[tuple[int, int], int]: ...

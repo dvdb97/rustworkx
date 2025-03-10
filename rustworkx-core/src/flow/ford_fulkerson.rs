@@ -37,23 +37,19 @@ where
 
         for edge_ref in graph.edges_directed(vertex, Direction::Outgoing) {
             let edge = (edge_ref.source().index(), edge_ref.target().index());
+            let succ = edge_ref.target();
 
-            if caps[&edge] - flow[&edge] > 0 {
-                let succ = edge_ref.target();
-
-                if !visited.is_visited(&succ) {
-                    queue.push_back(succ);
-                    preds[edge.1] = Some(ResArcType::Forward(edge));
-                }
+            if !visited.is_visited(&succ) &&  caps[&edge] - flow[&edge] > 0 {
+                queue.push_back(succ);
+                preds[edge.1] = Some(ResArcType::Forward(edge));
             }
         }
 
         for edge_ref in graph.edges_directed(vertex, Direction::Incoming) {
             let edge = (edge_ref.source().index(), edge_ref.target().index());
+            let succ = edge_ref.source();
 
-            if flow[&edge] > 0 {
-                let succ = edge_ref.source();
-
+            if !visited.is_visited(&succ) && flow[&edge] > 0  {
                 if !visited.is_visited(&succ) {
                     queue.push_back(succ);
                     preds[edge.0] = Some(ResArcType::Backward(edge));

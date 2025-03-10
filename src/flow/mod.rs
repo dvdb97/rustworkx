@@ -43,15 +43,15 @@ pub fn ford_fulkerson(
 
 #[pyfunction]
 #[pyo3(
-    signature=(graph, cap_fn, cost_fn),
-    text_signature = "(graph, cap_fn, cost_fn)"
+    signature=(graph, flow, cap_fn, cost_fn),
+    text_signature = "(graph, flow, cap_fn, cost_fn)"
 )]
 pub fn cycle_canceling(
     py: Python,
     graph: &digraph::PyDiGraph,
+    flow: HashMap<(usize, usize), u64>,
     cap_fn: Option<PyObject>,
     cost_fn: Option<PyObject>
-) -> PyResult<HashMap<(usize, usize), u64>> {
-    let flow = HashMap::new();   
+) -> PyResult<HashMap<(usize, usize), u64>> { 
     flow::cycle_canceling(&graph.graph, flow, |e| weight_callable(py, &cap_fn, e.weight(), u64::MAX), |e| weight_callable(py, &cost_fn, e.weight(), 0i64))
 }

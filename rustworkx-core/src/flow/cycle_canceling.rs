@@ -41,7 +41,7 @@ fn find_augmenting_cycle<G, E>(
     costs: &HashMap<(usize, usize), i64>
 ) -> Result<Option<(Vec<ResArcType<(usize, usize)>>, u64)>, E> 
 where
-    G: IntoEdges + Visitable + NodeCount + EdgeCount + IntoNodeIdentifiers + IntoEdgeReferences + NodeIndexable,
+    G: IntoEdges + Visitable + NodeCount + IntoNodeIdentifiers + IntoEdgeReferences + NodeIndexable,
     G::NodeId: Eq + IndexType + Hash
 {
     let cycle = negative_cycle_finder(
