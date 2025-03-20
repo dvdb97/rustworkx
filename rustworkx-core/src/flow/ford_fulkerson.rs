@@ -19,6 +19,66 @@ pub enum ResDfsArc<E> {
 }
 
 
+fn bidirectional_search<G>(
+    graph: G,
+    source: G::NodeId,
+    sink: G::NodeId,
+    caps: &HashMap<(usize, usize), u64>,
+    flow: &HashMap<(usize, usize), u64>,
+    preds: &mut Vec<Option<ResDfsArc<(usize, usize)>>>,
+    succs: &mut Vec<Option<ResDfsArc<(usize, usize)>>>
+) -> bool 
+where
+    G: IntoEdgesDirected + Visitable + NodeIndexable + NodeCount,
+    G::NodeId: Eq + IndexType + Hash
+{
+    let mut queue_s = Vec::from([source]);
+    let mut queue_t = Vec::from([sink]);
+
+    while true {
+        let mut queue = Vec::new();
+
+        if queue_s.len() <= queue_t.len() {
+            while let Some(vertex) = queue_s.pop() {
+                for edge_ref in graph.edges_directed(vertex, Direction::Outgoing) {
+                    let edge = (edge_ref.source().index(), edge_ref.target().index());
+        
+                    if preds[edge.1].is_none() && caps[&edge] - flow[&edge] > 0 {
+                        preds[edge.1] = Some(ResDfsArc::Forward(edge));
+
+                        if succs[edge.1].is_some() {
+                            return true;
+                        }
+
+                        queue.push(edge_ref.target());
+                    }
+                }
+        
+                for edge_ref in graph.edges_directed(vertex, Direction::Incoming) {
+                    let edge = (edge_ref.source().index(), edge_ref.target().index());
+        
+                    if preds[edge.0].is_none() && flow[&edge] > 0  {
+                        preds[edge.0] = Some(ResDfsArc::Backward(edge));
+
+                        if succs[edge.0].is_some() {
+                            return true;
+                        }
+
+                        queue.push(edge_ref.source());
+                    }
+                }
+            }
+
+            queue_s = queue;
+        } else {
+
+        }
+    }
+
+    false
+}
+
+
 fn find_augmenting_path<G>(
     graph: G,
     source: G::NodeId,
@@ -32,6 +92,7 @@ where
 {
     let mut queue = VecDeque::from([source]);
     let mut preds: Vec<Option<ResDfsArc<(usize, usize)>>> = vec![None; graph.node_count()];
+
     preds[source.index()] = Some(ResDfsArc::Root);
 
     while let Some(vertex) = queue.pop_front() {

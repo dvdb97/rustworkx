@@ -12,8 +12,6 @@ pub enum ResArcType<E> {
     Backward(E),
 }
 
-
-
 fn residual_edge_costs<E>(
     arc: &(usize, usize),
     flow: &HashMap<(usize, usize), u64>,

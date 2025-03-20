@@ -4,9 +4,6 @@ use hashbrown::HashMap;
 use petgraph::{csr::IndexType, visit::{IntoEdges, Visitable}};
 
 
-
-
-
 pub fn network_simplex<G, B, F, C, E>(
     graph: G,
     mut bal_fn: B,
