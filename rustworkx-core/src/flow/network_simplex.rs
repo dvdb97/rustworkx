@@ -166,42 +166,23 @@ where
     }
 
     fn remove_edge(&mut self, s: Option<usize>, t: Option<usize>) {
-        let subtree_t = match t {
-            Some(t) => t,
-            None => self.subtree_size.len() - 1,
-        };
-        let size_t = self.subtree_size[subtree_t];
-        let prev_node_dft_t = match t {
-            Some(t) => t,
-            None => self.prev_node_dft.len() - 1,
-        };
-        let last_descendent_dft_t = match t {
-            Some(t) => t,
-            None => self.last_descendent_dft.len() - 1,
-        };
-        let prev_t = match self.prev_node_dft[prev_node_dft_t] {
-            Some(val) => val,
-            None => self.next_node_dft.len() - 1,
-        };
-        let last_t = self.last_descendent_dft[last_descendent_dft_t];
-        let next_last_t = match self.next_node_dft[last_t] {
-            Some(val) => val,
-            None => self.prev_node_dft.len() - 1,
-        };
-        let parents_t = match t {
-            Some(t) => t,
-            None => self.parents.len() - 1,
-        };
-        self.parents[parents_t] = None;
-        let parent_edges_t = match t {
-            Some(t) => t,
-            None => self.parent_edges.len() - 1,
-        };
-        self.parent_edges[parent_edges_t] = None;
+        let t = t.unwrap_or(self.subtree_size.len() - 1);
+        let size_t = self.subtree_size[t];
+        let prev_t = self.prev_node_dft[t].unwrap_or(self.next_node_dft.len() - 1);
+        let last_t = self.last_descendent_dft[t];
+        let next_last_t = self.next_node_dft[last_t].unwrap_or(self.prev_node_dft.len() - 1);
+
+        // Remove (s, t).
+        self.parents[t] = None;
+        self.parent_edges[t] = None;
+
+        // Remove the subtree rooted at t from the depth-first thread.
         self.next_node_dft[prev_t] = Some(next_last_t);
         self.prev_node_dft[next_last_t] = Some(prev_t);
-        self.next_node_dft[last_t] = t;
-        self.prev_node_dft[prev_node_dft_t] = Some(last_t);
+        self.next_node_dft[last_t] = Some(t);
+        self.prev_node_dft[t] = Some(last_t);
+
+        // Update the subtree sizes and last descendants of the (old) ancestors of t.
         let mut loop_s = s;
         while loop_s.is_some() {
             let inner_s = loop_s.unwrap();
@@ -217,8 +198,9 @@ where
         for (i, p) in we.iter().zip(wn.iter()) {
             let source = match self.edge_sources[*i] {
                 Some(source) => self.node_map[&source],
-                None => self.num_nodes - 1,
+                None => self.num_nodes,
             };
+
             if source == *p {
                 self.edge_flow[*i] += f;
             } else {
@@ -230,21 +212,25 @@ where
     fn make_root(&mut self, q: usize) {
         let mut ancestors: Vec<usize> = Vec::new();
         let mut loop_q = Some(q);
+
         while loop_q.is_some() {
             ancestors.push(loop_q.unwrap());
             loop_q = self.parents[loop_q.unwrap()];
         }
+
         ancestors.reverse();
         for i in 0..ancestors.len() - 1 {
             let p = ancestors[i];
             let inner_q = ancestors[i + 1];
+
             let size_p = self.subtree_size[p];
             let mut last_p = self.last_descendent_dft[p];
-            let prev_q = self.prev_node_dft[p];
+            let prev_q = self.prev_node_dft[inner_q];
             let last_q = self.last_descendent_dft[inner_q];
             let next_last_q = self.next_node_dft[last_q];
+
             self.parents[p] = Some(inner_q);
-            self.parents[q] = None;
+            self.parents[inner_q] = None;
             self.parent_edges[p] = self.parent_edges[inner_q];
             self.parent_edges[inner_q] = None;
             self.subtree_size[p] = size_p - self.subtree_size[inner_q];
@@ -252,14 +238,14 @@ where
             self.next_node_dft[prev_q.unwrap_or(self.num_nodes - 1)] = next_last_q;
             self.prev_node_dft[next_last_q.unwrap_or(self.num_nodes - 1)] = prev_q;
             self.next_node_dft[last_q] = Some(inner_q);
-            self.prev_node_dft[q] = Some(last_q);
+            self.prev_node_dft[inner_q] = Some(last_q);
             if last_p == last_q {
                 self.last_descendent_dft[p] = prev_q.unwrap_or(self.num_nodes - 1);
                 last_p = prev_q.unwrap_or(self.num_nodes - 1);
             }
             self.prev_node_dft[p] = Some(last_q);
             self.next_node_dft[last_q] = Some(p);
-            self.next_node_dft[last_p] = Some(q);
+            self.next_node_dft[last_p] = Some(inner_q); // inner q?
             self.prev_node_dft[inner_q] = Some(last_p);
             self.last_descendent_dft[inner_q] = last_p;
         }
@@ -296,12 +282,14 @@ where
         } else {
             self.node_potentials[p] + self.edge_weights[i] - self.node_potentials[q]
         };
-        self.node_potentials[p] += d;
-        let l = self.last_descendent_dft[p];
-        let mut loop_p = p;
-        while loop_p != l {
-            loop_p = self.next_node_dft[loop_p].unwrap_or(self.num_nodes - 1);
-            self.node_potentials[q] += d;
+
+        // Update the potential in the subtree of q.
+        self.node_potentials[q] += d;
+        let l = self.last_descendent_dft[q];
+        let mut loop_q = q;
+        while loop_q != l {
+            loop_q = self.next_node_dft[loop_q].unwrap_or(self.num_nodes - 1);
+            self.node_potentials[loop_q] += d;
         }
     }
 }
@@ -424,18 +412,21 @@ where
         .collect();
     let mut demands: Vec<i64> = Vec::with_capacity(num_nodes);
     let mut demand_abs_max = 0;
+    let mut demand_summed = 0;
 
     for n in graph.node_references() {
         let demand_val = demand(n.weight())?;
-        // if demand_val.is_infinite() {
-        //     return Ok(None);
-        // }
-        
         demands.push(demand_val);
-        let abs_demand = demand_val.abs();
-        if abs_demand > demand_abs_max {
-            demand_abs_max = abs_demand;
+        demand_summed += demand_val;
+
+        if demand_val.abs() > demand_abs_max {
+            demand_abs_max = demand_val.abs();
         }
+    }
+
+    // TODO: Shouldn't incorrect balances just result in an exception?
+    if demand_summed != 0 {
+        return Ok(None)
     }
 
     // Look-up tables for the arcs and their attributes.
@@ -478,7 +469,9 @@ where
         .map(|(index, val)| (*val, index))
         .collect();
 
-    // TODO: Explain what's happening here.
+    // Add a dummy node None and connect all nodes in the network to it with infinite-capacity arcs.
+    // The node None will serve as a root of the spanning tree solution.
+    // This creates an initial strongly feasible spanning tree solution.
     for (index, demand) in demands.iter().enumerate() {
         if *demand > 0 {
             edge_sources.push(None);
@@ -493,17 +486,18 @@ where
         .into_iter()
         .max_by(|a, b| a.partial_cmp(b).unwrap())
         .unwrap();
-    let faux_infite = if max_value == 0 { 1 } else { max_value * 3 };
-    edge_weights.append(&mut vec![faux_infite; num_nodes]);
-    edge_capacities.append(&mut vec![faux_infite; num_nodes]);
+    let faux_inf = if max_value == 0 { 1 } else { max_value * 3 };
+    edge_weights.append(&mut vec![faux_inf; num_nodes]);
+    edge_capacities.append(&mut vec![faux_inf; num_nodes]);
 
-    // Pivot Loop
+    // Initialize the flow by assigning the demand to all dummy arcs.
     let mut edge_flow = vec![0; edge_count];
     edge_flow.extend(demands.iter().map(|x| x.abs()));
 
+    // Initialize the strongly feasible spanning tree structure.
     let node_potentials: Vec<i64> = demands
         .iter()
-        .map(|d| if *d <= 0 { faux_infite } else { -faux_infite })
+        .map(|d| if *d <= 0 { faux_inf } else { -faux_inf })
         .collect();
     let mut parents: Vec<Option<usize>> = vec![Some(num_nodes); num_nodes];
     parents.push(None);
@@ -517,6 +511,7 @@ where
     prev_node_dft.append(&mut tmp);
     let mut last_descendent_dft: Vec<usize> = (0..num_nodes).collect();
     last_descendent_dft.push(num_nodes - 1);
+
     let mut state: SimplexState<G> = SimplexState {
         num_nodes,
         node_map,
@@ -536,17 +531,21 @@ where
         last_descendent_dft,
     };
 
-    
     #[allow(non_snake_case)]
     let B: usize = (edge_count as f64).sqrt().ceil() as usize;
     #[allow(non_snake_case)]
     let M: usize = (edge_count + B - 1) / B;
+
+    // Number of consecutive blocks without eligible entering edges.
     let mut m = 0;
+    // First edge in the current block.
     let mut f = 0;
 
     // pivot loop
     while m < M {
+        // Compute the end of the next block of edges.
         let mut l = f + B;
+
         let edges: Vec<usize> = if l <= edge_count {
             (f..l).collect()
         } else {
@@ -555,6 +554,8 @@ where
             tmp.extend(0..l);
             tmp
         };
+
+        // Move to the next block.
         f = l;
 
         // Find the edge with the minimum reduced costs.
@@ -624,7 +625,7 @@ where
     }
 
     for i in 0..edge_count {
-        if state.edge_flow[i] * 2 >= faux_infite {
+        if state.edge_flow[i] * 2 >= faux_inf {
             return Ok(None);
         }
     }
@@ -672,9 +673,41 @@ mod tests {
             |n| Ok::<i64, Infallible>(*n as i64),
             |e: &[usize; 2]| Ok(e[1] as i64),
             |e: &[usize; 2]| Ok(e[0] as i64),
-        )
-        .unwrap()
-        .unwrap();
+        );
+        
+        let res = res.unwrap().unwrap();
         assert_eq!(res.cost, 150);
+    }
+
+
+    #[test]
+    fn test_circulation() {
+        // Taken from https://developers.google.com/optimization/flow/mincostflow
+        let start_nodes = [0, 1, 2];
+        let end_nodes = [1, 2, 0];
+        let capacities = [1, 1, 1];
+        let unit_costs = [1, 1, -10];
+        let supplies = [0, 0, 0];
+        let mut graph: DiGraph<isize, (isize, usize)> =
+            DiGraph::with_capacity(supplies.len(), start_nodes.len());
+        for i in 0..supplies.len() {
+            graph.add_node(-1 * supplies[i]);
+        }
+        for i in 0..start_nodes.len() {
+            graph.add_edge(
+                NodeIndex::new(start_nodes[i]),
+                NodeIndex::new(end_nodes[i]),
+                (unit_costs[i], capacities[i]),
+            );
+        }
+        let res = network_simplex(
+            &graph,
+            |n| Ok::<i64, Infallible>(*n as i64),
+            |e| Ok(e.1 as i64),
+            |e| Ok(e.0 as i64),
+        );
+        
+        let res = res.unwrap().unwrap();
+        assert_eq!(res.cost, -8);
     }
 }
