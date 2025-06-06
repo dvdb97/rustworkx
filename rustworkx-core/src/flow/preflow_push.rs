@@ -147,11 +147,6 @@ where
         let source = edge.source();
         let target = edge.target();
 
-        // TODO: Shouldn't a negative capacity just result in an exception?
-        if capacity < 0 {
-            return Ok(None);
-        }
-
         if source != target && capacity != 0 {
             edge_indices.push(edge.id());
             edge_capacities.push(capacity);
@@ -216,7 +211,8 @@ where
         .iter()
         .enumerate().filter(|(n, h)| *n != state.node_map[&s])
         .map(|(_, h)| h)
-        .max();
+        .max()
+        .unwrap();
     state.heights[state.node_map[&s]] = state.num_nodes as u64;
 
     // Populate the level data structure for efficiently finding active and inactive nodes.
