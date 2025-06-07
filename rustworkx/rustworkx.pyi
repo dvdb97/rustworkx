@@ -1061,6 +1061,13 @@ def ford_fulkerson(
     cap_fn: Callable[[_T], int]
 ) -> dict[tuple[int, int], int]: ...
 
+def network_simplex(
+    graph: PyDiGraph[_S, _T],
+    demand: Callable[[_T], int],
+    capacity: Callable[[_T], int],
+    weight: Callable[[_T], int]
+) -> tuple[int, dict[tuple[int, int], int]]: ...
+
 def cycle_canceling(
     graph: PyDiGraph[_S, _T],
     flow: dict[tuple[int, int], int],

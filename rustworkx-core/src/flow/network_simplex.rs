@@ -17,6 +17,7 @@ use petgraph::visit::{
     EdgeCount, EdgeRef, GraphBase, GraphProp, IntoEdgeReferences, IntoNodeReferences, NodeCount,
     NodeIndexable, NodeRef,
 };
+use rand::distributions::weighted::alias_method::Weight;
 
 /// The return type for `network_simplex()`. It has two attributes, `cost` and `flow_edges`.
 ///
@@ -376,9 +377,9 @@ where
 /// ```
 pub fn network_simplex<G, F, C, W, E>(
     graph: G,
-    mut demand: F,
-    mut capacity: C,
-    mut weight: W,
+    demand: F,
+    capacity: C,
+    weight: W,
 ) -> Result<Option<MCFReturn<G>>, E>
 where
     G: NodeIndexable
@@ -391,9 +392,9 @@ where
         + std::fmt::Debug,
     <G as GraphBase>::NodeId: Eq + Hash + std::fmt::Debug,
     <G as GraphBase>::EdgeId: Eq + Hash + std::fmt::Debug,
-    F: FnMut(&G::NodeWeight) -> Result<i64, E>,
-    C: FnMut(&G::EdgeWeight) -> Result<i64, E>,
-    W: FnMut(&G::EdgeWeight) -> Result<i64, E>,
+    F: Fn(G::NodeId) -> Result<i64, E>,
+    C: Fn(G::EdgeRef) -> Result<i64, E>,
+    W: Fn(G::EdgeRef) -> Result<i64, E>,
 {
     let num_nodes = graph.node_count();
     let edge_count = graph.edge_count();
@@ -415,7 +416,7 @@ where
     let mut demand_summed = 0;
 
     for n in graph.node_references() {
-        let demand_val = demand(n.weight())?;
+        let demand_val = demand(n.id())?;
         demands.push(demand_val);
         demand_summed += demand_val;
 
@@ -439,7 +440,7 @@ where
     let mut weight_sum: i64 = 0;
     
     for edge in graph.edge_references() {
-        let capacity = capacity(edge.weight())?;
+        let capacity = capacity(edge)?;
         let source = edge.source();
         let target = edge.target();
 
@@ -449,7 +450,7 @@ where
         }
 
         if source != target && capacity != 0 {
-            let weight = weight(edge.weight())?;
+            let weight = weight(edge)?;
 
             // TODO: Handle infinite capacities.
             capacity_sum += capacity;
@@ -645,7 +646,9 @@ where
 #[cfg(test)]
 mod tests {
     use crate::flow::{network_simplex, MCFReturn};
+    use crate::generators::grid_graph;
     use petgraph::graph::{DiGraph, NodeIndex};
+    use petgraph::prelude::StableDiGraph;
     use std::convert::Infallible;
 
     #[test]
@@ -670,9 +673,9 @@ mod tests {
         }
         let res = network_simplex(
             &graph,
-            |n| Ok::<i64, Infallible>(*n as i64),
-            |e: &[usize; 2]| Ok(e[1] as i64),
-            |e: &[usize; 2]| Ok(e[0] as i64),
+            |n| Ok::<i64, Infallible>(-1 * supplies[n.index()] as i64),
+            |e| Ok(e.weight()[1] as i64),
+            |e| Ok(e.weight()[0] as i64),
         );
         
         let res = res.unwrap().unwrap();
@@ -702,12 +705,35 @@ mod tests {
         }
         let res = network_simplex(
             &graph,
-            |n| Ok::<i64, Infallible>(*n as i64),
-            |e| Ok(e.1 as i64),
-            |e| Ok(e.0 as i64),
+            |n| Ok::<i64, Infallible>(supplies[n.index()] as i64),
+            |e| Ok(e.weight().1 as i64),
+            |e| Ok(e.weight().0 as i64),
         );
         
         let res = res.unwrap().unwrap();
         assert_eq!(res.cost, -8);
+    }
+
+    #[test]
+    fn test_grid_graph() {
+        let mut graph: Result<DiGraph<(), ()>, crate::generators::InvalidInputError> = grid_graph(
+            Some(100), 
+            Some(100), 
+            None, 
+            || (), 
+            || (), 
+            true);
+
+        let graph = graph.unwrap();
+
+        let res = network_simplex(
+            &graph,
+            |n| Ok::<i64, Infallible>(0 as i64),
+            |e| Ok(20 as i64),
+            |e| Ok(-1 as i64),
+        );
+
+        assert!(res.is_ok());
+        assert!(res.unwrap().is_some())
     }
 }
