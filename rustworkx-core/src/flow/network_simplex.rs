@@ -380,7 +380,7 @@ pub fn network_simplex<G, F, C, W, E>(
     demand: F,
     capacity: C,
     weight: W,
-) -> Result<Option<MCFReturn<G>>, E>
+) -> Result<Option<(i64, HashMap<(usize, usize), i64>)>, E>
 where
     G: NodeIndexable
         + IntoNodeReferences
@@ -632,14 +632,23 @@ where
     }
 
     state.edge_flow.drain(edge_count..);
-    let cost = state
+    let cost: i64 = state
         .edge_weights
         .iter()
         .zip(state.edge_flow.iter())
         .map(|(w, x)| w * x)
         .sum();
-    let flow_edges = HashMap::with_capacity(num_nodes);
-    Ok(Some(MCFReturn { cost, flow_edges }))
+
+    let mut flow = HashMap::new();
+    for (i, f) in state.edge_flow.iter().enumerate() {
+        let source = state.edge_sources[i].unwrap();
+        let target = state.edge_targets[i].unwrap();
+        let edge = (state.node_map[&source], state.node_map[&target]);
+
+        flow.insert(edge, *f);
+    }
+
+    Ok(Some((cost, flow)))
 }
 
 
@@ -678,8 +687,8 @@ mod tests {
             |e| Ok(e.weight()[0] as i64),
         );
         
-        let res = res.unwrap().unwrap();
-        assert_eq!(res.cost, 150);
+        let (cost, flow) = res.unwrap().unwrap();
+        assert_eq!(cost, 150);
     }
 
 
@@ -710,13 +719,13 @@ mod tests {
             |e| Ok(e.weight().0 as i64),
         );
         
-        let res = res.unwrap().unwrap();
-        assert_eq!(res.cost, -8);
+        let (cost, flow) = res.unwrap().unwrap();
+        assert_eq!(cost, -8);
     }
 
     #[test]
     fn test_grid_graph() {
-        let mut graph: Result<DiGraph<(), ()>, crate::generators::InvalidInputError> = grid_graph(
+        let graph: Result<DiGraph<(), ()>, crate::generators::InvalidInputError> = grid_graph(
             Some(100), 
             Some(100), 
             None, 
@@ -728,9 +737,9 @@ mod tests {
 
         let res = network_simplex(
             &graph,
-            |n| Ok::<i64, Infallible>(0 as i64),
-            |e| Ok(20 as i64),
-            |e| Ok(-1 as i64),
+            |_| Ok::<i64, Infallible>(0 as i64),
+            |_| Ok(20 as i64),
+            |_| Ok(-1 as i64),
         );
 
         assert!(res.is_ok());
