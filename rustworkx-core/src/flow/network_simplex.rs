@@ -10,7 +10,7 @@
 // License for the specific language governing permissions and limitations
 // under the License.
 
-use std::hash::Hash;
+use std::{hash::Hash, io::Write};
 
 use hashbrown::HashMap;
 use petgraph::visit::{
@@ -130,6 +130,10 @@ where
     }
 
     fn residual_capacity(&self, i: usize, p: usize) -> i64 {
+        if i == self.edge_sources.len() {
+            return 0;
+        }
+
         let source = match self.edge_sources[i] {
             Some(source) => self.node_map[&source],
             None => self.num_nodes - 1,
@@ -257,12 +261,21 @@ where
         let next_last_p = self.next_node_dft[last_p];
         let size_q = self.subtree_size[q];
         let last_q = self.last_descendent_dft[q];
+
+        // Make q a child of p.
         self.parents[q] = Some(p);
         self.parent_edges[q] = Some(i);
+
+        // Insert the subtree rooted at q into the depth-first thread.
         self.next_node_dft[last_p] = Some(q);
         self.prev_node_dft[q] = Some(last_p);
         self.prev_node_dft[next_last_p.unwrap_or(self.num_nodes - 1)] = Some(last_q);
+        if next_last_p.is_none() {
+            println!("MAYBE ERROR?!")
+        }
         self.next_node_dft[last_q] = next_last_p;
+
+        // Update the subtree sizes and last descendants of the (new) ancestors of q.
         let mut loop_p = Some(p);
         while loop_p.is_some() {
             self.subtree_size[loop_p.unwrap()] += size_q;
@@ -278,6 +291,7 @@ where
             Some(t) => self.node_map[&t],
             None => self.num_nodes - 1,
         };
+
         let d = if q == target {
             self.node_potentials[p] - self.edge_weights[i] - self.node_potentials[q]
         } else {
@@ -287,11 +301,22 @@ where
         // Update the potential in the subtree of q.
         self.node_potentials[q] += d;
         let l = self.last_descendent_dft[q];
+
         let mut loop_q = q;
         while loop_q != l {
             loop_q = self.next_node_dft[loop_q].unwrap_or(self.num_nodes - 1);
+
+            if loop_q == self.node_potentials.len() {
+                println!("{look}", look=l);
+                for (idx, val) in self.next_node_dft.iter().enumerate() {
+                    print!("{i}: {v}, ", i=idx, v=val.unwrap_or(1000000));
+                }
+                println!();
+            }
             self.node_potentials[loop_q] += d;
         }
+
+        println!("Finished loop");
     }
 }
 
@@ -449,8 +474,13 @@ where
             return Ok(None);
         }
 
-        if source != target && capacity != 0 {
-            let weight = weight(edge)?;
+        if capacity == 0 {
+            
+            continue;
+        }
+
+        if source != target {
+            let weight = weight(edge)?;          
 
             // TODO: Handle infinite capacities.
             capacity_sum += capacity;
@@ -503,13 +533,17 @@ where
     let mut parents: Vec<Option<usize>> = vec![Some(num_nodes); num_nodes];
     parents.push(None);
     let parent_edges: Vec<Option<usize>> = (edge_count..edge_count + num_nodes).map(Some).collect();
+    
     let mut subtree_size: Vec<usize> = vec![1; num_nodes];
     subtree_size.push(num_nodes + 1);
+    
     let mut next_node_dft: Vec<Option<usize>> = (1..num_nodes).map(Some).collect();
     next_node_dft.extend([None, Some(0)].into_iter());
+
     let mut tmp: Vec<Option<usize>> = (0..num_nodes).map(Some).collect();
     let mut prev_node_dft: Vec<Option<usize>> = vec![None; 1];
     prev_node_dft.append(&mut tmp);
+    
     let mut last_descendent_dft: Vec<usize> = (0..num_nodes).collect();
     last_descendent_dft.push(num_nodes - 1);
 
@@ -541,6 +575,8 @@ where
     let mut m = 0;
     // First edge in the current block.
     let mut f = 0;
+
+    println!("=== Starting Simplex");
 
     // pivot loop
     while m < M {
@@ -610,14 +646,28 @@ where
                 {
                     std::mem::swap(&mut p, &mut q);
                 }
+
+                print!("[Remove edge");
                 state.remove_edge(Some(s), t);
+                println!("]");
+
+                print!("[Make root");
                 state.make_root(q);
+                println!("]");
+
+                print!("[Add edge");
                 state.add_edge(i, p, q);
+                println!("]");
+
+                print!("[Update Potentials");
                 state.update_potentials(i, p, q);
+                println!("]");
             }
             m = 0;
         }
     }
+
+    println!("=== Stopping simplex");
 
     for flow in &state.edge_flow[state.edge_flow.len() - num_nodes..] {
         if *flow != 0 {
@@ -654,11 +704,12 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::flow::{network_simplex, MCFReturn};
+    use crate::flow::{network_simplex};
     use crate::generators::grid_graph;
     use petgraph::graph::{DiGraph, NodeIndex};
-    use petgraph::prelude::StableDiGraph;
+    use petgraph::visit::EdgeRef;
     use std::convert::Infallible;
+    use rand::prelude::*;
 
     #[test]
     fn test_google_example_1() {
@@ -744,5 +795,74 @@ mod tests {
 
         assert!(res.is_ok());
         assert!(res.unwrap().is_some())
+    }
+
+    #[test]
+    fn test_random_grid_graph() {
+        let graph: Result<DiGraph<(), ()>, crate::generators::InvalidInputError> = grid_graph(
+            Some(100), 
+            Some(100), 
+            None, 
+            || (), 
+            || (), 
+            true);
+        
+        let graph = graph.unwrap();
+
+        let mut rng = rand::thread_rng();
+        let mut capacities = Vec::new();
+        let mut costs = Vec::new();
+        for _ in 0..graph.edge_count() {
+            capacities.push(rng.gen_range(1..20));
+            costs.push(rng.gen_range(-20..20));
+        }
+
+        let res = network_simplex(
+            &graph,
+            |_| Ok::<i64, Infallible>(0 as i64),
+            |e| Ok(capacities[e.id().index()] as i64),
+            |e| Ok(costs[e.id().index()] as i64)
+        );
+
+        assert!(res.is_ok());
+        assert!(res.unwrap().is_some())
+    }
+
+    #[test]
+    fn test_out_of_bounds_instance() {
+        let data: [[isize; 32]; 4] = [
+            [0,  0, 1,  1, 1,  2,  2,   2, 3, 3,  3,  4, 4,  4,  4,   4,  5,  5, 5, 6,  6, 7, 7,  7, 8,  8,   9,  10,   11,   12, 13,  14],
+            [1,  3, 0,  2, 4,  1,  5,  11, 0, 4,  6,  1, 3,  5,  7,  12,  2,  4, 8, 3,  7, 4, 6,  8, 5,  7,   3,   6,   14,   14,  6,  13],
+            [4, 14, 2, 20, 1, 13, 11, 999, 5, 4, 16, 13, 2, 11, 17, 999, 15, 18, 1, 8, 14, 5, 12, 7, 4, 18, 999, 999,  999,  999,  0, 999],
+            [2,  3, 5,  3, 1,  6,  2,   0, 7, 0,  4,  5, 7,  7,  9,   0,  0,  2, 7, 6,  7, 1,  7, 4, 9,  0,   0,   0, -101, -101,  0,   0]
+        ];
+        let start_nodes = data[0];
+        let end_nodes = data[1];
+        let capacities = data[2];
+        let unit_costs = data[3];
+        let supplies = [0; 15];
+
+        let mut graph: DiGraph<isize, (isize, isize)> = DiGraph::with_capacity(supplies.len(), start_nodes.len());
+        
+        for i in 0..supplies.len() {
+            graph.add_node(-1 * supplies[i]);
+        }
+
+        for i in 0..start_nodes.len() {
+            graph.add_edge(
+                NodeIndex::new(start_nodes[i] as usize),
+                NodeIndex::new(end_nodes[i] as usize),
+                (unit_costs[i], capacities[i]),
+            );
+        }
+        let res = network_simplex(
+            &graph,
+            |n| Ok::<i64, Infallible>(-1 * supplies[n.index()] as i64),
+            |e| Ok(e.weight().1 as i64),
+            |e| Ok(e.weight().0 as i64),
+        );
+        
+        let (cost, flow) = res.unwrap().unwrap();
+        assert_eq!(cost, 150);
     }
 }
