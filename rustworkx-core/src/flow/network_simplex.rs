@@ -270,9 +270,6 @@ where
         self.next_node_dft[last_p] = Some(q);
         self.prev_node_dft[q] = Some(last_p);
         self.prev_node_dft[next_last_p.unwrap_or(self.num_nodes - 1)] = Some(last_q);
-        if next_last_p.is_none() {
-            println!("MAYBE ERROR?!")
-        }
         self.next_node_dft[last_q] = next_last_p;
 
         // Update the subtree sizes and last descendants of the (new) ancestors of q.
@@ -305,18 +302,8 @@ where
         let mut loop_q = q;
         while loop_q != l {
             loop_q = self.next_node_dft[loop_q].unwrap_or(self.num_nodes - 1);
-
-            if loop_q == self.node_potentials.len() {
-                println!("{look}", look=l);
-                for (idx, val) in self.next_node_dft.iter().enumerate() {
-                    print!("{i}: {v}, ", i=idx, v=val.unwrap_or(1000000));
-                }
-                println!();
-            }
             self.node_potentials[loop_q] += d;
         }
-
-        println!("Finished loop");
     }
 }
 
@@ -421,8 +408,8 @@ where
     C: Fn(G::EdgeRef) -> Result<i64, E>,
     W: Fn(G::EdgeRef) -> Result<i64, E>,
 {
-    let num_nodes = graph.node_count();
-    let edge_count = graph.edge_count();
+    let mut num_nodes = graph.node_count();
+    let mut edge_count = graph.edge_count();
 
     // There is no minimum cost flow in an empty network.
     if num_nodes == 0 || edge_count == 0 {
@@ -475,7 +462,7 @@ where
         }
 
         if capacity == 0 {
-            
+            edge_count -= 1;
             continue;
         }
 
@@ -576,8 +563,6 @@ where
     // First edge in the current block.
     let mut f = 0;
 
-    println!("=== Starting Simplex");
-
     // pivot loop
     while m < M {
         // Compute the end of the next block of edges.
@@ -647,27 +632,14 @@ where
                     std::mem::swap(&mut p, &mut q);
                 }
 
-                print!("[Remove edge");
                 state.remove_edge(Some(s), t);
-                println!("]");
-
-                print!("[Make root");
                 state.make_root(q);
-                println!("]");
-
-                print!("[Add edge");
                 state.add_edge(i, p, q);
-                println!("]");
-
-                print!("[Update Potentials");
                 state.update_potentials(i, p, q);
-                println!("]");
             }
             m = 0;
         }
     }
-
-    println!("=== Stopping simplex");
 
     for flow in &state.edge_flow[state.edge_flow.len() - num_nodes..] {
         if *flow != 0 {
@@ -862,7 +834,44 @@ mod tests {
             |e| Ok(e.weight().0 as i64),
         );
         
-        let (cost, flow) = res.unwrap().unwrap();
-        assert_eq!(cost, 150);
+        let (cost, _) = res.unwrap().unwrap();
+        assert_eq!(cost, 0);
+    }
+
+    #[test]
+    fn test_out_of_bounds_instance2() {
+        let data = [
+            [0,  0, 1,  1, 1,  2,  2,   2, 3, 3,  3,  4,  4,  4,  4,  5,  5,  5,  6, 6,   6,  6,  6,  7,  7, 7,  8, 8,   9,  10,   11,   13,   14,  15, 16, 17,  18,  18],
+            [1,  3, 0,  2, 4,  1,  5,  11, 0, 4,  6,  1,  3,  5,  7,  2,  4,  8,  3, 7,  12, 13, 14,  4,  6, 8,  5, 7,   7,   8,   18,   18,   18,   8,  8,  7,  17,  16],
+            [1, 12, 9, 12, 7, 12,  2, 999, 8, 8, 19, 19, 10, 19, 19, 15, 14, 19, 20, 1, 999,  3,  1, 17, 13, 4, 17, 1, 999, 999,  999,  999,  999,   4,  1,  0, 999, 999],
+            [0,  8, 5,  8, 0,  0,  4,   0, 2, 5,  3,  7,  1,  9,  9,  5, 10,  4,  9, 3,   0,  0, 91,  9,  9, 5,  9, 0,   0,   0, -101, -101, -101,   0, 25,  0,   0,   0]
+        ];
+        let start_nodes = data[0];
+        let end_nodes = data[1];
+        let capacities = data[2];
+        let unit_costs = data[3];
+        let supplies = [0; 19];
+
+        let mut graph: DiGraph<isize, (isize, isize)> = DiGraph::with_capacity(supplies.len(), start_nodes.len());
+        
+        for i in 0..supplies.len() {
+            graph.add_node(-1 * supplies[i]);
+        }
+
+        for i in 0..start_nodes.len() {
+            graph.add_edge(
+                NodeIndex::new(start_nodes[i] as usize),
+                NodeIndex::new(end_nodes[i] as usize),
+                (unit_costs[i], capacities[i]),
+            );
+        }
+        let res = network_simplex(
+            &graph,
+            |n| Ok::<i64, Infallible>(-1 * supplies[n.index()] as i64),
+            |e| Ok(e.weight().1 as i64),
+            |e| Ok(e.weight().0 as i64),
+        );
+        
+        let (cost, _) = res.unwrap().unwrap();
     }
 }
