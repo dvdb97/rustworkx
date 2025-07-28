@@ -75,32 +75,17 @@ where
         }
     }
 
-    fn check_spanning_tree(&self) {
-        let mut visited: Vec<bool> = vec![false; self.parents.len()];
-        let mut counter = 0;
-        let mut loop_i = self.next_node_dft[self.parents.len()-1].unwrap();
-        while !visited[loop_i] {
-            counter += 1;
-            visited[loop_i] = false;
+    fn readjust_potentials(&mut self) {
+        let mut loop_q = self.next_node_dft[self.num_nodes];
+        while loop_q.is_some() {
+            let i = self.parent_edges[loop_q.unwrap()].unwrap();
+            let c = self.reduced_cost(i);
 
-            loop_i = self.next_node_dft[loop_i].unwrap();
+            self.node_potentials[loop_q.unwrap()] = c;            
+            assert_eq!(self.reduced_cost(i), 0);
+
+            loop_q = self.next_node_dft[loop_q.unwrap()];
         }
-        
-        assert_eq!(counter, self.parents.len()-1);
-        assert!(visited.iter().all(|b| *b));
-
-        let mut visited: Vec<bool> = vec![false; self.parents.len()];
-        let mut counter = 0;
-        let mut loop_i = self.prev_node_dft[self.parents.len()-1].unwrap();
-        while !visited[loop_i] {
-            counter += 1;
-            visited[loop_i] = false;
-
-            loop_i = self.prev_node_dft[loop_i].unwrap();
-        }
-        
-        assert_eq!(counter, self.parents.len()-1);
-        assert!(visited.iter().all(|b| *b));
     }
 
     fn find_apex(&self, p: usize, q: usize) -> usize {
@@ -664,6 +649,8 @@ where
                 state.make_root(q);
                 state.add_edge(i, p, q);
                 state.update_potentials(i, p, q);
+
+                state.readjust_potentials();
             }
             m = 0;
         }
@@ -702,9 +689,294 @@ where
 }
 
 
+pub fn lex_max<G, C, W, E>(
+    graph: G,
+    capacity: C,
+    weight: W,
+    critical_edges: Vec<usize>,
+    iterations: Vec<Vec<usize>>
+) -> Result<Option<Vec<i64>>, E>
+where
+    G: NodeIndexable
+        + IntoNodeReferences
+        + IntoEdgeReferences
+        + NodeCount
+        + EdgeCount
+        + GraphProp
+        + GraphBase
+        + std::fmt::Debug,
+    <G as GraphBase>::NodeId: Eq + Hash + std::fmt::Debug,
+    <G as GraphBase>::EdgeId: Eq + Hash + std::fmt::Debug,
+    C: Fn(G::EdgeRef) -> Result<i64, E>,
+    W: Fn(G::EdgeRef) -> Result<i64, E>,
+{
+    let num_nodes = graph.node_count();
+    let mut edge_count = graph.edge_count();
+
+    // There is no minimum cost flow in an empty network.
+    if num_nodes == 0 || edge_count == 0 {
+        println!("Empty network");
+        return Ok(Some(vec![0; iterations.len()]));
+    }
+
+    // Look-up tables for nodes and their supply / demand.
+    let node_indices: Vec<G::NodeId> = graph.node_identifiers().collect();
+    let node_map: HashMap<G::NodeId, usize> = node_indices
+        .iter()
+        .enumerate()
+        .map(|(index, val)| (*val, index))
+        .collect();
+    let demands: Vec<i64> = vec![0; num_nodes];
+
+    // Look-up tables for the arcs and their attributes.
+    let mut edge_indices: Vec<G::EdgeId> = Vec::with_capacity(edge_count);
+    let mut edge_capacities: Vec<i64> = Vec::with_capacity(edge_count);
+    let mut edge_weights: Vec<i64> = Vec::with_capacity(edge_count);
+    let mut edge_sources: Vec<Option<G::NodeId>> = Vec::with_capacity(edge_count + num_nodes);
+    let mut edge_targets: Vec<Option<G::NodeId>> = Vec::with_capacity(edge_count + num_nodes);
+    let mut capacity_sum: i64 = 0;
+    let mut weight_sum: i64 = 0;
+    
+    for edge in graph.edge_references() {
+        let capacity = capacity(edge)?;
+        let source = edge.source();
+        let target = edge.target();
+
+        // TODO: Shouldn't a negative capacity just result in an exception?
+        if capacity < 0 {
+            println!("Negative capacity!");
+            return Ok(None);
+        }
+
+        if capacity == 0 {
+            edge_count -= 1;
+            continue;
+        }
+
+        if source != target {
+            let weight = weight(edge)?;          
+
+            // TODO: Handle infinite capacities.
+            capacity_sum += capacity;
+            weight_sum += weight.abs();
+
+            edge_indices.push(edge.id());
+            edge_capacities.push(capacity);
+            edge_weights.push(weight);
+            edge_sources.push(Some(source));
+            edge_targets.push(Some(target));
+        }
+    }
+
+    let edge_map: HashMap<G::EdgeId, usize> = edge_indices
+        .iter()
+        .enumerate()
+        .map(|(index, val)| (*val, index))
+        .collect();
+
+    // Add a dummy node None and connect all nodes in the network to it with infinite-capacity arcs.
+    // The node None will serve as a root of the spanning tree solution.
+    // This creates an initial strongly feasible spanning tree solution.
+    for (index, demand) in demands.iter().enumerate() {
+        if *demand > 0 {
+            edge_sources.push(None);
+            edge_targets.push(Some(node_indices[index]));
+        } else {
+            edge_sources.push(Some(node_indices[index]));
+            edge_targets.push(None);
+        }
+    }
+
+    let max_value = [capacity_sum, weight_sum]
+        .into_iter()
+        .max_by(|a, b| a.partial_cmp(b).unwrap())
+        .unwrap();
+    let faux_inf = if max_value == 0 { 1 } else { max_value * 3 };
+    edge_weights.append(&mut vec![faux_inf; num_nodes]);
+    edge_capacities.append(&mut vec![faux_inf; num_nodes]);
+
+    // Initialize the flow by assigning the demand to all dummy arcs.
+    let mut edge_flow = vec![0; edge_count];
+    edge_flow.extend(demands.iter().map(|x| x.abs()));
+
+    // Initialize the strongly feasible spanning tree structure.
+    let node_potentials: Vec<i64> = demands
+        .iter()
+        .map(|d| if *d <= 0 { faux_inf } else { -faux_inf })
+        .collect();
+    let mut parents: Vec<Option<usize>> = vec![Some(num_nodes); num_nodes];
+    parents.push(None);
+    let parent_edges: Vec<Option<usize>> = (edge_count..edge_count + num_nodes).map(Some).collect();
+    
+    let mut subtree_size: Vec<usize> = vec![1; num_nodes];
+    subtree_size.push(num_nodes + 1);
+    
+    let mut next_node_dft: Vec<Option<usize>> = (1..num_nodes).map(Some).collect();
+    next_node_dft.extend([None, Some(0)].into_iter());
+
+    let mut tmp: Vec<Option<usize>> = (0..num_nodes).map(Some).collect();
+    let mut prev_node_dft: Vec<Option<usize>> = vec![None; 1];
+    prev_node_dft.append(&mut tmp);
+    
+    let mut last_descendent_dft: Vec<usize> = (0..num_nodes).collect();
+    last_descendent_dft.push(num_nodes - 1);
+
+    let mut state: SimplexState<G> = SimplexState {
+        num_nodes,
+        node_map,
+        edge_count,
+        edge_map,
+        edge_capacities,
+        edge_weights,
+        edge_sources,
+        edge_targets,
+        edge_flow,
+        node_potentials,
+        parents,
+        parent_edges,
+        subtree_size,
+        next_node_dft,
+        prev_node_dft,
+        last_descendent_dft,
+    };
+
+    #[allow(non_snake_case)]
+    let B: usize = (edge_count as f64).sqrt().ceil() as usize;
+    #[allow(non_snake_case)]
+    let M: usize = (edge_count + B - 1) / B;
+
+    // Number of consecutive blocks without eligible entering edges.
+    let mut m = 0;
+    // First edge in the current block.
+    let mut f = 0;
+
+    let mut results = Vec::new();
+    
+    for edges in iterations {
+        for edge in critical_edges.iter() {
+            state.edge_weights[edge.id()] = faux_inf;
+        }
+
+        for edge in edges.iter() {
+            state.edge_weights[edge.id()] = 0;
+        }
+        
+        state.readjust_potentials();
+
+        // pivot loop
+        while m < M {
+            // Compute the end of the next block of edges.
+            let mut l = f + B;
+
+            let edges: Vec<usize> = if l <= edge_count {
+                (f..l).collect()
+            } else {
+                l -= edge_count;
+                let mut tmp: Vec<usize> = (f..edge_count).collect();
+                tmp.extend(0..l);
+                tmp
+            };
+
+            // Move to the next block.
+            f = l;
+
+            // Find the edge with the minimum reduced costs.
+            let i = edges
+                .into_iter()
+                .min_by_key(|x| state.reduced_cost(*x))
+                .unwrap();
+            let c = state.reduced_cost(i);
+
+            if c >= 0 {
+                m += 1;
+            } else {
+                let mut p: usize;
+                let mut q: usize;
+
+                if state.edge_flow[i] == 0 {
+                    p = match state.edge_sources[i] {
+                        Some(source) => state.node_map[&source],
+                        None => num_nodes - 1,
+                    };
+                    q = match state.edge_targets[i] {
+                        Some(target) => state.node_map[&target],
+                        None => num_nodes - 1,
+                    };
+                } else {
+                    p = match state.edge_targets[i] {
+                        Some(target) => state.node_map[&target],
+                        None => num_nodes - 1,
+                    };
+                    q = match state.edge_sources[i] {
+                        Some(source) => state.node_map[&source],
+                        None => num_nodes - 1,
+                    };
+                }
+
+                let [wn, we] = state.find_cycle(i, p, q);
+                let (j, mut s, mut t) = state.find_leaving_edge(&wn, &we);
+                state.augment_flow(&wn, &we, state.residual_capacity(j, s));
+                
+                if i != j {
+                    let mut parents_t = match t {
+                        Some(t) => t,
+                        None => state.parents.len() - 1,
+                    };
+                    if state.parents[parents_t] != Some(s) {
+                        std::mem::swap(&mut parents_t, &mut s);
+                        t = Some(parents_t);
+                    }
+                    if we.iter().position(|x| *x == i).unwrap()
+                        > we.iter().position(|x| *x == j).unwrap()
+                    {
+                        std::mem::swap(&mut p, &mut q);
+                    }
+
+                    state.remove_edge(Some(s), t);
+                    state.make_root(q);
+                    state.add_edge(i, p, q);
+                    state.update_potentials(i, p, q);
+                }
+                m = 0;
+            }
+        }
+
+        let mut abort = false;
+
+        for flow in &state.edge_flow[state.edge_flow.len() - num_nodes..] {
+            if *flow != 0 {
+                results.push(0);
+                abort = true;
+                break;
+            }
+        }
+
+        for i in 0..edge_count {
+            if state.edge_flow[i] * 2 >= faux_inf {
+                results.push(0);
+                abort = true;
+                break;
+            }
+        }
+
+        if !abort {
+            let cost: i64 = state
+                .edge_weights
+                .iter()
+                .zip(state.edge_flow.iter())
+                .map(|(w, x)| w * x)
+                .sum();
+            results.push(cost);
+        }
+    }
+    
+    Ok(Some(results))
+}
+
+
 #[cfg(test)]
 mod tests {
-    use crate::flow::{network_simplex};
+    use crate::flow::{lex_max, network_simplex};
     use crate::generators::grid_graph;
     use petgraph::graph::{DiGraph, NodeIndex};
     use petgraph::visit::EdgeRef;
@@ -939,5 +1211,44 @@ mod tests {
         );
         
         let (cost, _) = res.unwrap().unwrap();
+    }
+
+    #[test]
+    fn test_lex_max_instance() {
+        let data = [
+            [0, 0, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 4, 4, 5, 5, 5, 6, 6, 6, 6, 7, 7, 7, 7, 8, 8, 8, 8, 9, 9, 9, 10, 10, 10, 11, 11, 11, 11, 12, 12, 12, 12, 13, 13, 13, 13, 14, 14, 14, 15, 15, 15, 16, 16, 16, 16, 17, 17, 17, 17, 18, 18, 18, 18, 18, 19, 19, 19, 19, 20, 20, 21, 21, 21, 21, 22, 22, 22, 23, 23, 23, 23, 24, 24, 25, 25, 25, 25, 25, 26],
+            [1, 5, 0, 2, 6, 1, 3, 7, 26, 2, 4, 8, 3, 9, 0, 6, 10, 1, 5, 7, 11, 2, 6, 8, 12, 3, 7, 9, 13, 4, 8, 14, 5, 11, 15, 6, 10, 12, 16, 7, 11, 13, 17, 8, 12, 14, 18, 9, 13, 19, 10, 16, 20, 11, 15, 17, 21, 12, 16, 18, 22, 13, 17, 19, 23, 26, 14, 18, 24, 26, 15, 21, 16, 20, 22, 26, 17, 21, 23, 18, 22, 24, 26, 19, 23, 0, 9, 13, 20, 24, 25],
+            [18, 20, 16, 15, 8, 14, 12, 17, 5000, 11, 20, 9, 4, 9, 3, 12, 20, 12, 12, 6, 14, 1, 19, 14, 9, 20, 7, 11, 4, 11, 19, 19, 11, 6, 18, 9, 4, 9, 4, 10, 2, 12, 8, 6, 9, 6, 7, 9, 17, 11, 8, 3, 19, 18, 4, 14, 5, 17, 10, 14, 16, 18, 1, 4, 19, 5000, 8, 17, 20, 5000, 20, 10, 16, 16, 4, 5000, 5, 3, 2, 14, 1, 4, 5000, 2, 1, 5000, 5000, 5000, 5000, 5000, 5000],
+            [8, 0, 3, 4, 10, 0, 1, 4, 0, 9, 2, 10, 2, 7, 6, 0, 3, 5, 0, 0, 5, 5, 10, 3, 7, 10, 8, 8, 2, 9, 2, 9, 6, 8, 8, 6, 5, 2, 9, 5, 3, 3, 9, 3, 9, 4, 8, 6, 7, 10, 7, 2, 5, 0, 4, 5, 10, 3, 1, 3, 2, 3, 2, 6, 10, 0, 7, 7, 3, 0, 0, 1, 0, 7, 10, 0, 10, 7, 10, 6, 3, 1, 0, 4, 9, 0, 0, 0, 0, 0, -101] 
+        ];
+        let start_nodes = data[0];
+        let end_nodes = data[1];
+        let capacities = data[2];
+        let unit_costs = data[3];
+        let supplies = [0; 37];
+
+        let mut graph: DiGraph<isize, (isize, isize)> = DiGraph::with_capacity(supplies.len(), start_nodes.len());
+        
+        for i in 0..supplies.len() {
+            graph.add_node(-1 * supplies[i]);
+        }
+
+        for i in 0..start_nodes.len() {
+            graph.add_edge(
+                NodeIndex::new(start_nodes[i] as usize),
+                NodeIndex::new(end_nodes[i] as usize),
+                (unit_costs[i], capacities[i]),
+            );
+        }
+        let res = lex_max(
+            &graph,
+            |e| Ok::<i64, Infallible>(e.weight().1 as i64),
+            |e| Ok(e.weight().0 as i64),
+            vec![85, 86, 87, 88, 89, 8, 65, 69, 75, 82],
+            vec![vec![85, 8, 65, 69, 75, 82, 82, 82, 82, 82], vec![85, 86, 8, 65, 69, 75, 82, 82, 82, 82], vec![85, 86, 87, 8, 65, 69, 75, 82, 82, 82], vec![85, 86, 87, 88, 8, 65, 69, 75, 82, 82], vec![85, 86, 87, 88, 89, 8, 65, 69, 75, 82], vec![85, 86, 87, 88, 89, 65, 69, 75, 82, 82], vec![85, 86, 87, 88, 89, 69, 75, 82, 82, 82], vec![85, 86, 87, 88, 89, 75, 82, 82, 82, 82], vec![85, 86, 87, 88, 89, 82, 82, 82, 82, 82], vec![85, 86, 87, 88, 89, 89, 89, 89, 89, 89]]
+        );
+
+        let res = res.unwrap().unwrap();
+        println!("{:#?}", res);
     }
 }

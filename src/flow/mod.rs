@@ -117,11 +117,6 @@ pub fn network_simplex(
     capacity: Option<PyObject>,
     weight: Option<PyObject>,
 ) -> PyResult<(i64, HashMap<(usize, usize), i64>)> {
-    // let flow = flow::network_simplex(
-    //     &graph.graph, 
-    //     |n| demand.call1(py, (graph.graph.node_weight(n),))?.extract::<i64>(py), 
-    //     |e| weight_callable(py, &capacity, e.weight(), i64::MAX), 
-    //     |e| weight_callable(py, &weight, e.weight(), 0))?;
     let flow = flow::network_simplex(
         &graph.graph, 
         |n| demand.call1(py, (graph.graph.node_weight(n),))?.extract::<i64>(py), 
@@ -131,5 +126,35 @@ pub fn network_simplex(
     match flow {
         Some((cost, flow)) => Ok((cost, flow)),
         None => Ok((0, HashMap::new()))
+    }
+}
+
+
+#[pyfunction]
+#[pyo3(
+    signature=(graph, capacity, weight, critical_edges, iterations),
+    text_signature = "(graph, capacity, weight, critical_edges, iterations/)"
+)]
+pub fn lex_max(
+    py: Python,
+    graph: &digraph::PyDiGraph,
+    capacity: Option<PyObject>,
+    weight: Option<PyObject>,
+    critical_edges: Vec<usize>,
+    iterations: Vec<Vec<usize>>
+) -> PyResult<Vec<i64>> {
+    let iters = iterations.len();
+
+    let result = flow::lex_max(
+        &graph.graph,
+        |e| weight_callable(py, &capacity, e.weight(), i64::MAX), 
+        |e| weight_callable(py, &weight, e.weight(), 0),
+        critical_edges,
+        iterations
+    )?;
+
+    match result {
+        Some(values) => Ok(values),
+        None => Ok(vec![0; iters])
     }
 }

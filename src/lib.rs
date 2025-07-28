@@ -631,6 +631,7 @@ fn rustworkx(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     m.add_wrapped(wrap_pyfunction!(ford_fulkerson))?;
     m.add_wrapped(wrap_pyfunction!(cycle_canceling))?;
     m.add_wrapped(wrap_pyfunction!(network_simplex))?;
+    m.add_wrapped(wrap_pyfunction!(lex_max))?;
     m.add_class::<digraph::PyDiGraph>()?;
     m.add_class::<graph::PyGraph>()?;
     m.add_class::<toposort::TopologicalSorter>()?;

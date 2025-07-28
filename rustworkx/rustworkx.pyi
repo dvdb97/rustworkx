@@ -1068,6 +1068,14 @@ def network_simplex(
     weight: Callable[[_T], int]
 ) -> tuple[int, dict[tuple[int, int], int]]: ...
 
+def lex_max(
+    graph: PyDiGraph[_S, _T],
+    capacity: Callable[[_T], int],
+    weight: Callable[[_T], int],
+    critical_edges: list[int],
+    iterations: list[list[int]]
+) -> list[int]: ...
+
 def cycle_canceling(
     graph: PyDiGraph[_S, _T],
     flow: dict[tuple[int, int], int],
