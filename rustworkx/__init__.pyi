@@ -244,6 +244,7 @@ from .rustworkx import digraph_union as digraph_union
 from .rustworkx import graph_union as graph_union
 from .rustworkx import ford_fulkerson as ford_fulkerson
 from .rustworkx import network_simplex as network_simplex
+from .rustworkx import lex_max as lex_max
 from .rustworkx import cycle_canceling as cycle_canceling
 from .rustworkx import immediate_dominators as immediate_dominators
 from .rustworkx import dominance_frontiers as dominance_frontiers
