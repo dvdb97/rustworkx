@@ -75,18 +75,55 @@ where
         }
     }
 
+    // fn readjust_potentials(&mut self) {
+    //     let mut loop_q = self.next_node_dft[self.num_nodes];
+    //     while loop_q.is_some() {
+    //         let i = self.parent_edges[loop_q.unwrap()].unwrap();
+    //         let c = self.reduced_cost(i);
+
+    //         self.node_potentials[loop_q.unwrap()] = c;            
+    //         assert_eq!(self.reduced_cost(i), 0);
+
+    //         loop_q = self.next_node_dft[loop_q.unwrap()];
+    //     }
+    // }
+
     fn readjust_potentials(&mut self) {
-        let mut loop_q = self.next_node_dft[self.num_nodes];
-        while loop_q.is_some() {
-            let i = self.parent_edges[loop_q.unwrap()].unwrap();
-            let c = self.reduced_cost(i);
+    // Start traversal from the first node in the depth-first list after the dummy root.
+    // The DFT ensures we process parents before their children.
+    let mut loop_q = self.next_node_dft[self.num_nodes];
 
-            self.node_potentials[loop_q.unwrap()] = c;            
-            assert_eq!(self.reduced_cost(i), 0);
+    while let Some(q_idx) = loop_q {
+        // A node in the spanning tree (that is not the root) must have a parent.
+        if let Some(p_idx) = self.parents[q_idx] {
+            let edge_idx = self.parent_edges[q_idx].unwrap();
+            let weight = self.edge_weights[edge_idx];
 
-            loop_q = self.next_node_dft[loop_q.unwrap()];
+            // The artificial root (p_idx == num_nodes) has an implicit potential of 0.
+            // For all other "real" nodes, we look up their potential from the vector.
+            let p_potential = if p_idx == self.num_nodes {
+                0
+            } else {
+                self.node_potentials[p_idx]
+            };
+
+            // The edge's source and target from the original graph definition.
+            // .unwrap() is safe because parent edges are always between real nodes.
+            let edge_source_idx = self.edge_sources[edge_idx].map(|id| self.node_map[&id]).unwrap();
+
+            // Restore the zero reduced cost property: c'(u,v) = w(u,v) - π(u) + π(v) = 0
+            if edge_source_idx == p_idx {
+                // Arc is (p, q). New potential π(q) = π(p) - w(p,q).
+                self.node_potentials[q_idx] = p_potential - weight;
+            } else {
+                // Arc is (q, p). New potential π(q) = π(p) + w(q,p).
+                self.node_potentials[q_idx] = p_potential + weight;
+            }
         }
+        // Move to the next node in the tree.
+        loop_q = self.next_node_dft[q_idx];
     }
+}
 
     fn find_apex(&self, p: usize, q: usize) -> usize {
         let mut size_p = self.subtree_size[p];
@@ -804,6 +841,7 @@ where
         .iter()
         .map(|d| if *d <= 0 { faux_inf } else { -faux_inf })
         .collect();
+    
     let mut parents: Vec<Option<usize>> = vec![Some(num_nodes); num_nodes];
     parents.push(None);
     let parent_edges: Vec<Option<usize>> = (edge_count..edge_count + num_nodes).map(Some).collect();
@@ -860,7 +898,7 @@ where
         for edge in edges.iter() {
             state.edge_weights[edge.id()] = 0;
         }
-        
+                        
         state.readjust_potentials();
 
         // pivot loop
@@ -1246,6 +1284,45 @@ mod tests {
             |e| Ok(e.weight().0 as i64),
             vec![85, 86, 87, 88, 89, 8, 65, 69, 75, 82],
             vec![vec![85, 8, 65, 69, 75, 82, 82, 82, 82, 82], vec![85, 86, 8, 65, 69, 75, 82, 82, 82, 82], vec![85, 86, 87, 8, 65, 69, 75, 82, 82, 82], vec![85, 86, 87, 88, 8, 65, 69, 75, 82, 82], vec![85, 86, 87, 88, 89, 8, 65, 69, 75, 82], vec![85, 86, 87, 88, 89, 65, 69, 75, 82, 82], vec![85, 86, 87, 88, 89, 69, 75, 82, 82, 82], vec![85, 86, 87, 88, 89, 75, 82, 82, 82, 82], vec![85, 86, 87, 88, 89, 82, 82, 82, 82, 82], vec![85, 86, 87, 88, 89, 89, 89, 89, 89, 89]]
+        );
+
+        let res = res.unwrap().unwrap();
+        println!("{:#?}", res);
+    }
+
+    #[test]
+    fn test_lex_max_instance_tiny() {
+        let data = [
+            [0, 0, 1, 1, 2, 2, 3, 4, 4, 5, 6, 7],
+            [1, 2, 3, 5, 3, 6, 4, 5, 6, 7, 7, 0],
+            [1000, 1000, 6, 3, 6, 2, 4, 10, 3, 1000, 1000, 1000],
+            [0, 0, 1, 2, 1, 2, 3, 1, 0, 0, 0, -11] 
+        ];
+        let start_nodes = data[0];
+        let end_nodes = data[1];
+        let capacities = data[2];
+        let unit_costs = data[3];
+        let supplies = [0; 8];
+
+        let mut graph: DiGraph<isize, (isize, isize)> = DiGraph::with_capacity(supplies.len(), start_nodes.len());
+        
+        for i in 0..supplies.len() {
+            graph.add_node(-1 * supplies[i]);
+        }
+
+        for i in 0..start_nodes.len() {
+            graph.add_edge(
+                NodeIndex::new(start_nodes[i] as usize),
+                NodeIndex::new(end_nodes[i] as usize),
+                (unit_costs[i], capacities[i]),
+            );
+        }
+        let res = lex_max(
+            &graph,
+            |e| Ok::<i64, Infallible>(e.weight().1 as i64),
+            |e| Ok(e.weight().0 as i64),
+            vec![0, 1, 9, 10],
+            vec![vec![9, 10, 10, 10], vec![9, 10, 0, 0], vec![9, 10, 0, 1], vec![10, 0, 1, 1], vec![0, 1, 1, 1]]
         );
 
         let res = res.unwrap().unwrap();
