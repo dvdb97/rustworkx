@@ -1066,7 +1066,7 @@ def network_simplex(
     demand: Callable[[_T], int],
     capacity: Callable[[_T], int],
     weight: Callable[[_T], int]
-) -> tuple[int, dict[tuple[int, int], int]]: ...
+) -> tuple[int, dict[int, dict[int, int]]]: ...
 
 def cycle_canceling(
     graph: PyDiGraph[_S, _T],

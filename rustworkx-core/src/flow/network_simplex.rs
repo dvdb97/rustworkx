@@ -420,7 +420,7 @@ pub fn network_simplex<G, F, C, W, E>(
     demand: F,
     capacity: C,
     weight: W,
-) -> Result<Option<(i64, HashMap<(usize, usize), i64>)>, E>
+) -> Result<Option<(i64, HashMap<usize, HashMap<usize, i64>>)>, E>
 where
     G: NodeIndexable
         + IntoNodeReferences
@@ -691,11 +691,14 @@ where
 
     let mut flow = HashMap::new();
     for (i, f) in state.edge_flow.iter().enumerate() {
-        let source = state.edge_sources[i].unwrap();
-        let target = state.edge_targets[i].unwrap();
-        let edge = (state.node_map[&source], state.node_map[&target]);
+        let source = state.node_map[&state.edge_sources[i].unwrap()];
 
-        flow.insert(edge, *f);
+        if !flow.contains_key(&source) {
+            flow.insert(source, HashMap::new());
+        }
+        let target = state.node_map[&state.edge_targets[i].unwrap()];
+
+        flow.get_mut(&source).unwrap().insert(target, *f);
     }
 
     Ok(Some((cost, flow)))

@@ -116,7 +116,7 @@ pub fn network_simplex(
     demand: PyObject,
     capacity: Option<PyObject>,
     weight: Option<PyObject>,
-) -> PyResult<(i64, HashMap<(usize, usize), i64>)> {
+) -> PyResult<(i64, HashMap<usize, HashMap<usize, i64>>)> {
     // let flow = flow::network_simplex(
     //     &graph.graph, 
     //     |n| demand.call1(py, (graph.graph.node_weight(n),))?.extract::<i64>(py), 
