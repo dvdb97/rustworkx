@@ -841,7 +841,7 @@ where
         .iter()
         .map(|d| if *d <= 0 { faux_inf } else { -faux_inf })
         .collect();
-    
+
     let mut parents: Vec<Option<usize>> = vec![Some(num_nodes); num_nodes];
     parents.push(None);
     let parent_edges: Vec<Option<usize>> = (edge_count..edge_count + num_nodes).map(Some).collect();
@@ -861,13 +861,13 @@ where
 
     let mut state: SimplexState<G> = SimplexState {
         num_nodes,
-        node_map,
+        node_map: node_map.clone(),
         edge_count,
-        edge_map,
-        edge_capacities,
-        edge_weights,
-        edge_sources,
-        edge_targets,
+        edge_map: edge_map.clone(),
+        edge_capacities: edge_capacities,
+        edge_weights: edge_weights,
+        edge_sources: edge_sources,
+        edge_targets: edge_targets,
         edge_flow,
         node_potentials,
         parents,
@@ -878,18 +878,8 @@ where
         last_descendent_dft,
     };
 
-    #[allow(non_snake_case)]
-    let B: usize = (edge_count as f64).sqrt().ceil() as usize;
-    #[allow(non_snake_case)]
-    let M: usize = (edge_count + B - 1) / B;
-
-    // Number of consecutive blocks without eligible entering edges.
-    let mut m = 0;
-    // First edge in the current block.
-    let mut f = 0;
-
     let mut results = Vec::new();
-    
+
     for edges in iterations {
         for edge in critical_edges.iter() {
             state.edge_weights[edge.id()] = faux_inf;
@@ -898,8 +888,44 @@ where
         for edge in edges.iter() {
             state.edge_weights[edge.id()] = 0;
         }
-                        
-        state.readjust_potentials();
+
+        // Initialize the flow by assigning the demand to all dummy arcs.
+        let mut edge_flow = vec![0; edge_count];
+        edge_flow.extend(demands.iter().map(|x| x.abs()));
+
+        // Initialize the strongly feasible spanning tree structure.
+        state.node_potentials = demands
+            .iter()
+            .map(|d| if *d <= 0 { faux_inf } else { -faux_inf })
+            .collect();
+
+        state.parents = vec![Some(num_nodes); num_nodes];
+        state.parents.push(None);
+        state.parent_edges = (edge_count..edge_count + num_nodes).map(Some).collect();
+        
+        state.subtree_size = vec![1; num_nodes];
+        state.subtree_size.push(num_nodes + 1);
+        
+        state.next_node_dft = (1..num_nodes).map(Some).collect();
+        state.next_node_dft.extend([None, Some(0)].into_iter());
+
+        let mut tmp: Vec<Option<usize>> = (0..num_nodes).map(Some).collect();
+        state.prev_node_dft = vec![None; 1];
+        state.prev_node_dft.append(&mut tmp);
+        
+        state.last_descendent_dft = (0..num_nodes).collect();
+        state.last_descendent_dft.push(num_nodes - 1);
+        
+
+        #[allow(non_snake_case)]
+        let B: usize = (edge_count as f64).sqrt().ceil() as usize;
+        #[allow(non_snake_case)]
+        let M: usize = (edge_count + B - 1) / B;
+
+        // Number of consecutive blocks without eligible entering edges.
+        let mut m = 0;
+        // First edge in the current block.
+        let mut f = 0;
 
         // pivot loop
         while m < M {
